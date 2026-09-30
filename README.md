@@ -36,6 +36,7 @@ python main.py                          # Interactive mode
 | `--html` | Also generate an HTML report |
 | `-o NAME` | Custom base name for output files |
 | `-q` | Quiet mode (save files only, no console output) |
+| *(no arguments)* | Opens a file picker dialog popup and generates both text + HTML reports |
 
 ### Examples
 
@@ -49,7 +50,7 @@ rtcm_decoder.exe capture.bin --html
 # Custom output name
 rtcm_decoder.exe capture.bin --html -o analysis_report
 
-# Interactive file selection (no arguments)
+# Interactive mode (opens file picker dialog popup)
 rtcm_decoder.exe
 ```
 
