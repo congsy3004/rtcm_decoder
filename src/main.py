@@ -14,7 +14,6 @@ import argparse
 import os
 import sys
 import time
-import glob
 from datetime import datetime
 
 # Ensure console output handles Unicode on all platforms (e.g. cp932 on Windows)
@@ -123,6 +122,31 @@ def save_reports(parser, file_path, file_size, decode_time,
 # Interactive mode
 # =============================================================================
 
+def _open_file_dialog():
+    """Open a native file picker dialog and return the selected path.
+
+    Returns:
+        File path string, or None if the user cancelled.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()          # hide the root window
+        root.attributes('-topmost', True)  # dialog appears on top
+        file_path = filedialog.askopenfilename(
+            title="RTCM Decoder - Select .bin file",
+            filetypes=[
+                ("Binary files", "*.bin"),
+                ("All files", "*.*"),
+            ],
+        )
+        root.destroy()
+        return file_path if file_path else None
+    except Exception:
+        return None
+
+
 def interactive_mode():
     """Interactive file selection and decode when no arguments are given."""
     print()
@@ -130,59 +154,24 @@ def interactive_mode():
     print("  " + "=" * 50)
     print()
 
-    # Look for .bin files in the current directory and ./output/
-    bin_files = sorted(glob.glob("*.bin"))
-    output_dir = os.path.join(_get_app_dir(), "output")
-    if os.path.isdir(output_dir):
-        bin_files += sorted(
-            os.path.join("output", f)
-            for f in os.listdir(output_dir)
-            if f.endswith('.bin')
-        )
+    # Try to open a file dialog
+    print("  Opening file picker...")
+    file_path = _open_file_dialog()
 
-    if bin_files:
-        print("  Found .bin files:")
-        for i, f in enumerate(bin_files, 1):
-            size = os.path.getsize(f)
-            print(f"    [{i}] {f}  ({format_bytes(size)})")
-        print(f"    [0] Enter a custom path")
-        print()
+    if not file_path:
+        # Fallback: manual path entry if dialog was cancelled or unavailable
+        print("  No file selected. Enter path manually:")
+        file_path = input("  Path: ").strip().strip('"')
 
-        while True:
-            choice = input("  Select [0-" + str(len(bin_files)) + "]: ").strip()
-            try:
-                idx = int(choice)
-                if idx == 0:
-                    file_path = input("  Path: ").strip().strip('"')
-                    break
-                elif 1 <= idx <= len(bin_files):
-                    file_path = bin_files[idx - 1]
-                    break
-            except ValueError:
-                # Treat raw text as a file path
-                if choice:
-                    file_path = choice.strip().strip('"')
-                    break
-            print("  Invalid selection.")
-    else:
-        file_path = input("  Enter path to .bin file: ").strip().strip('"')
-
-    if not os.path.isfile(file_path):
+    if not file_path or not os.path.isfile(file_path):
         print(f"  [!] File not found: {file_path}")
         return
 
-    # Ask for output format
-    print()
-    print("  Output format:")
-    print("    [1] Text report only")
-    print("    [2] Text + HTML report")
-    print()
-    fmt = input("  Select [1-2] (Enter for 1): ").strip()
-    html = fmt == '2'
+    print(f"  Selected: {file_path}")
 
     # Decode
     print()
-    print(f"  Decoding: {file_path}")
+    print(f"  Decoding...")
     parser, file_size, decode_time = decode_file(file_path)
     ts = datetime.now()
     print(f"  Done in {decode_time * 1000:.1f} ms")
@@ -193,8 +182,8 @@ def interactive_mode():
                                 timestamp=ts)
     print(text)
 
-    # Save reports
-    saved = save_reports(parser, file_path, file_size, decode_time, html=html,
+    # Save both text and HTML reports
+    saved = save_reports(parser, file_path, file_size, decode_time, html=True,
                          timestamp=ts)
     print()
     print("  Reports saved:")
