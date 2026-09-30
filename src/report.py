@@ -5,6 +5,7 @@ and produce a complete report string ready to be saved to disk.
 """
 
 import os
+import html as html_mod
 from datetime import datetime
 from rtcm_messages import RTCM_MESSAGE_TYPES
 
@@ -13,7 +14,7 @@ from rtcm_messages import RTCM_MESSAGE_TYPES
 # Helpers
 # =============================================================================
 
-def _format_bytes(n):
+def format_bytes(n):
     """Format a byte count with an appropriate unit."""
     if n < 1024:
         return f"{n} B"
@@ -27,10 +28,11 @@ def _integrity_info(parser):
     """Compute integrity metrics from parser state.
 
     Returns:
-        (success_pct, is_clean, known_count, unknown_count, unknown_types)
+        (success_pct, is_clean, has_data, known_count, unknown_count, unknown_types)
     """
     total = parser.total_messages + parser.sync_losses
     success_pct = (parser.total_messages / total * 100) if total > 0 else 100.0
+    has_data = parser.total_messages > 0 or parser.discarded_bytes > 0
 
     unknown_types = sorted(
         t for t in parser.stats if t not in RTCM_MESSAGE_TYPES
@@ -41,14 +43,15 @@ def _integrity_info(parser):
     unknown_count = sum(parser.stats[t] for t in unknown_types)
     is_clean = parser.sync_losses == 0 and parser.crc_errors == 0
 
-    return success_pct, is_clean, known_count, unknown_count, unknown_types
+    return success_pct, is_clean, has_data, known_count, unknown_count, unknown_types
 
 
 # =============================================================================
 # Text Report
 # =============================================================================
 
-def generate_text_report(parser, file_path, file_size, decode_time):
+def generate_text_report(parser, file_path, file_size, decode_time,
+                         timestamp=None):
     """Generate a plain-text report string.
 
     Args:
@@ -56,19 +59,23 @@ def generate_text_report(parser, file_path, file_size, decode_time):
         file_path:   Path of the decoded .bin file.
         file_size:   Size of the input file in bytes.
         decode_time: Time taken to decode, in seconds.
+        timestamp:   Optional datetime for the report header.
+                     Defaults to datetime.now() if not provided.
 
     Returns:
         Complete report as a string.
     """
-    pct, is_clean, known_cnt, unknown_cnt, unknown_types = _integrity_info(parser)
+    if timestamp is None:
+        timestamp = datetime.now()
+    pct, is_clean, has_data, known_cnt, unknown_cnt, unknown_types = _integrity_info(parser)
 
     lines = []
     lines.append("RTCM Decoder - Analysis Report")
     lines.append("=" * 72)
     lines.append(f"  File        : {os.path.basename(file_path)}")
     lines.append(f"  Full path   : {os.path.abspath(file_path)}")
-    lines.append(f"  File size   : {_format_bytes(file_size)}")
-    lines.append(f"  Decoded at  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"  File size   : {format_bytes(file_size)}")
+    lines.append(f"  Decoded at  : {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Decode time : {decode_time * 1000:.1f} ms")
     lines.append("=" * 72)
 
@@ -82,10 +89,10 @@ def generate_text_report(parser, file_path, file_size, decode_time):
     )
     lines.append(
         f"    CRC errors    : {parser.crc_errors:<10d}"
-        f"  Discarded    : {_format_bytes(parser.discarded_bytes)}"
+        f"  Discarded    : {format_bytes(parser.discarded_bytes)}"
     )
     lines.append(
-        f"    Parsed bytes  : {_format_bytes(parser.total_bytes_parsed):<10s}"
+        f"    Parsed bytes  : {format_bytes(parser.total_bytes_parsed):<10s}"
         f"          Frame success : {pct:.1f}%"
     )
     lines.append(
@@ -94,7 +101,9 @@ def generate_text_report(parser, file_path, file_size, decode_time):
     )
     lines.append("")
 
-    if is_clean:
+    if not has_data:
+        lines.append("    Status : NO DATA  (file contains no RTCM frames)")
+    elif is_clean:
         lines.append("    Status : CLEAN  (no corruption detected)")
     else:
         lines.append(
@@ -128,7 +137,7 @@ def generate_text_report(parser, file_path, file_size, decode_time):
                 desc = "[?] Unknown type"
             lines.append(
                 f"  {msg_type:>6}  {count:>8,}  "
-                f"{_format_bytes(total_b):>10}  "
+                f"{format_bytes(total_b):>10}  "
                 f"{avg_b:>5}B  {desc}"
             )
 
@@ -137,7 +146,7 @@ def generate_text_report(parser, file_path, file_size, decode_time):
         )
         lines.append(
             f"  {'TOTAL':>6}  {parser.total_messages:>8,}  "
-            f"{_format_bytes(parser.total_bytes_parsed):>10}"
+            f"{format_bytes(parser.total_bytes_parsed):>10}"
         )
     else:
         lines.append("  No RTCM messages found in file.")
@@ -287,7 +296,8 @@ _HTML_TEMPLATE = """\
 """
 
 
-def generate_html_report(parser, file_path, file_size, decode_time):
+def generate_html_report(parser, file_path, file_size, decode_time,
+                         timestamp=None):
     """Generate a self-contained HTML report string.
 
     Args:
@@ -295,11 +305,15 @@ def generate_html_report(parser, file_path, file_size, decode_time):
         file_path:   Path of the decoded .bin file.
         file_size:   Size of the input file in bytes.
         decode_time: Time taken to decode, in seconds.
+        timestamp:   Optional datetime for the report footer.
+                     Defaults to datetime.now() if not provided.
 
     Returns:
         Complete HTML document as a string.
     """
-    pct, is_clean, known_cnt, unknown_cnt, unknown_types = _integrity_info(parser)
+    if timestamp is None:
+        timestamp = datetime.now()
+    pct, is_clean, has_data, known_cnt, unknown_cnt, unknown_types = _integrity_info(parser)
 
     # Build message table rows
     max_count = max(parser.stats.values()) if parser.stats else 1
@@ -323,7 +337,7 @@ def generate_html_report(parser, file_path, file_size, decode_time):
             f'<tr{row_class}>'
             f'<td class="num">{msg_type}</td>'
             f'<td class="num">{count:,}</td>'
-            f'<td class="num">{_format_bytes(total_b)}</td>'
+            f'<td class="num">{format_bytes(total_b)}</td>'
             f'<td class="num">{avg_b} B</td>'
             f'<td class="bar-cell">'
             f'<div class="{bar_class}" style="width:{bar_width}%"></div></td>'
@@ -336,7 +350,7 @@ def generate_html_report(parser, file_path, file_size, decode_time):
         f'<tr class="total">'
         f'<td></td>'
         f'<td class="num">{parser.total_messages:,}</td>'
-        f'<td class="num">{_format_bytes(parser.total_bytes_parsed)}</td>'
+        f'<td class="num">{format_bytes(parser.total_bytes_parsed)}</td>'
         f'<td></td><td></td>'
         f'<td>Total</td>'
         f'</tr>'
@@ -360,40 +374,46 @@ def generate_html_report(parser, file_path, file_size, decode_time):
         table_html = '<p>No RTCM messages found in file.</p>'
 
     # Status banner
-    if is_clean:
+    if not has_data:
+        status_div = (
+            '<div class="status-broken">'
+            '&#9888; NO DATA &mdash; file contains no RTCM frames'
+            '</div>'
+        )
+    elif is_clean:
         status_div = (
             '<div class="status-clean">'
-            '&#10004; CLEAN — no corruption detected'
+            '&#10004; CLEAN &mdash; no corruption detected'
             '</div>'
         )
     else:
         status_div = (
             '<div class="status-broken">'
-            f'&#10008; BROKEN — {parser.sync_losses} corruption event(s), '
+            f'&#10008; BROKEN &mdash; {parser.sync_losses} corruption event(s), '
             f'{parser.crc_errors} CRC error(s)'
             '</div>'
         )
 
     return _HTML_TEMPLATE.format(
-        filename=os.path.basename(file_path),
-        filepath=os.path.abspath(file_path),
-        file_size=_format_bytes(file_size),
+        filename=html_mod.escape(os.path.basename(file_path)),
+        filepath=html_mod.escape(os.path.abspath(file_path)),
+        file_size=format_bytes(file_size),
         decode_time=f"{decode_time * 1000:.1f} ms",
         valid_messages=f"{parser.total_messages:,}",
-        valid_class="ok" if is_clean else "",
+        valid_class="ok" if is_clean and has_data else "",
         success_pct=f"{pct:.1f}%",
-        pct_class="ok" if pct == 100.0 else "warn",
+        pct_class="ok" if pct == 100.0 and has_data else "warn",
         crc_errors=str(parser.crc_errors),
         crc_class="ok" if parser.crc_errors == 0 else "warn",
         sync_losses=str(parser.sync_losses),
         sync_class="ok" if parser.sync_losses == 0 else "warn",
-        parsed_bytes=_format_bytes(parser.total_bytes_parsed),
-        discarded_bytes=_format_bytes(parser.discarded_bytes),
+        parsed_bytes=format_bytes(parser.total_bytes_parsed),
+        discarded_bytes=format_bytes(parser.discarded_bytes),
         disc_class="" if parser.discarded_bytes == 0 else "warn",
         known_count=str(known_cnt),
         unknown_count=str(unknown_cnt),
         unk_class="" if unknown_cnt == 0 else "warn",
         status_div=status_div,
         table_html=table_html,
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        timestamp=timestamp.strftime("%Y-%m-%d %H:%M:%S"),
     )

@@ -18,9 +18,9 @@ echo.
 python -m PyInstaller ^
     --onefile ^
     --name rtcm_decoder ^
-    --distpath "..\dist" ^
-    --workpath "..\build" ^
-    --specpath ".." ^
+    --distpath "dist" ^
+    --workpath "build" ^
+    --specpath "." ^
     --clean ^
     --noconfirm ^
     src\main.py

@@ -15,27 +15,30 @@ import os
 import sys
 import time
 import glob
+from datetime import datetime
 
 # Ensure console output handles Unicode on all platforms (e.g. cp932 on Windows)
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 from rtcm_parser import RTCMParser
-from report import generate_text_report, generate_html_report
+from report import generate_text_report, generate_html_report, format_bytes
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
 
-def _format_bytes(n):
-    """Format a byte count with an appropriate unit."""
-    if n < 1024:
-        return f"{n} B"
-    elif n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
+def _get_app_dir():
+    """Return the directory where the application lives.
+
+    When running as a PyInstaller exe, sys.executable points to the exe.
+    When running as a script, __file__ points to main.py inside src/.
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     else:
-        return f"{n / (1024 * 1024):.2f} MB"
+        return os.path.dirname(os.path.abspath(__file__))
 
 
 # =============================================================================
@@ -54,14 +57,14 @@ def decode_file(file_path):
     file_size = os.path.getsize(file_path)
     parser = RTCMParser()
 
-    t0 = time.time()
+    t0 = time.perf_counter()
     with open(file_path, 'rb') as f:
         while True:
             chunk = f.read(8192)
             if not chunk:
                 break
             parser.feed(chunk)
-    decode_time = time.time() - t0
+    decode_time = time.perf_counter() - t0
 
     return parser, file_size, decode_time
 
@@ -71,7 +74,7 @@ def decode_file(file_path):
 # =============================================================================
 
 def save_reports(parser, file_path, file_size, decode_time,
-                 output_name=None, html=False):
+                 output_name=None, html=False, timestamp=None):
     """Generate and save report files next to the input .bin file.
 
     Args:
@@ -81,6 +84,7 @@ def save_reports(parser, file_path, file_size, decode_time,
         decode_time: Decode duration in seconds.
         output_name: Optional base name for output files (without extension).
         html:        If True, also generate an HTML report.
+        timestamp:   Optional datetime for report headers.
 
     Returns:
         List of saved file paths.
@@ -94,7 +98,8 @@ def save_reports(parser, file_path, file_size, decode_time,
     saved = []
 
     # --- Text report ---
-    text = generate_text_report(parser, file_path, file_size, decode_time)
+    text = generate_text_report(parser, file_path, file_size, decode_time,
+                                timestamp=timestamp)
     txt_path = base + ".txt"
     with open(txt_path, 'w', encoding='utf-8') as f:
         f.write(text)
@@ -103,7 +108,8 @@ def save_reports(parser, file_path, file_size, decode_time,
     # --- HTML report ---
     if html:
         html_content = generate_html_report(
-            parser, file_path, file_size, decode_time
+            parser, file_path, file_size, decode_time,
+            timestamp=timestamp,
         )
         html_path = base + ".html"
         with open(html_path, 'w', encoding='utf-8') as f:
@@ -126,8 +132,7 @@ def interactive_mode():
 
     # Look for .bin files in the current directory and ./output/
     bin_files = sorted(glob.glob("*.bin"))
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "output")
+    output_dir = os.path.join(_get_app_dir(), "output")
     if os.path.isdir(output_dir):
         bin_files += sorted(
             os.path.join("output", f)
@@ -139,7 +144,7 @@ def interactive_mode():
         print("  Found .bin files:")
         for i, f in enumerate(bin_files, 1):
             size = os.path.getsize(f)
-            print(f"    [{i}] {f}  ({_format_bytes(size)})")
+            print(f"    [{i}] {f}  ({format_bytes(size)})")
         print(f"    [0] Enter a custom path")
         print()
 
@@ -179,15 +184,18 @@ def interactive_mode():
     print()
     print(f"  Decoding: {file_path}")
     parser, file_size, decode_time = decode_file(file_path)
+    ts = datetime.now()
     print(f"  Done in {decode_time * 1000:.1f} ms")
     print()
 
     # Print text report to console
-    text = generate_text_report(parser, file_path, file_size, decode_time)
+    text = generate_text_report(parser, file_path, file_size, decode_time,
+                                timestamp=ts)
     print(text)
 
     # Save reports
-    saved = save_reports(parser, file_path, file_size, decode_time, html=html)
+    saved = save_reports(parser, file_path, file_size, decode_time, html=html,
+                         timestamp=ts)
     print()
     print("  Reports saved:")
     for p in saved:
@@ -240,11 +248,13 @@ def main():
 
     # Decode
     rtcm_parser, file_size, decode_time = decode_file(args.file)
+    ts = datetime.now()
 
     # Console output
     if not args.quiet:
         text = generate_text_report(
-            rtcm_parser, args.file, file_size, decode_time
+            rtcm_parser, args.file, file_size, decode_time,
+            timestamp=ts,
         )
         print(text)
 
@@ -253,6 +263,7 @@ def main():
         rtcm_parser, args.file, file_size, decode_time,
         output_name=args.output,
         html=args.html,
+        timestamp=ts,
     )
 
     if not args.quiet:
